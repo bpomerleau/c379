@@ -10,21 +10,29 @@
 #include <sys/types.h>
 
 int main(int argc, char *argv[]){
-    char in_str[100];
-    char *out_str[6];
-    int i = 0;
-    while(true){
-        printf("input: ");
-        fgets(in_str, 100, stdin);
-        strtok(in_str, " ");
-        char *index = strtok(NULL, " ");
-        printf("%s", index);
-        printf("%d\n", atoi(index));
+    // char in_str[100];
+    // char *out_str[6];
+    // int i = 0;
+    // while(true){
+    //     printf("input: ");
+    //     fgets(in_str, 100, stdin);
+    //     strtok(in_str, " ");
+    //     char *index = strtok(NULL, " ");
+    //     printf("%s", index);
+    //     printf("%d\n", atoi(index));
         // out_str[i] = strtok(in_str, " ");
         // printf("%s\n%s\n",in_str, out_str[i]);
         // for(i = 1; i < 6; i++){
         //     out_str[i] = strtok(NULL, " ");
         //     printf("%s\n%s\n",in_str, out_str[i]);
         // }
+    // }
+    int *p;
+    p = (int *) malloc(sizeof(int)*6);
+    for (int i = 0; i < 6; i++){
+        p[i]=i;
+    }
+    for (int i = 0; i < 6; i++){
+        printf("%d\n", p[i]);
     }
 }

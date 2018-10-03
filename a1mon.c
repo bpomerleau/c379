@@ -1,15 +1,5 @@
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/time.h>
-#include <sys/times.h>
-#include <sys/resource.h>
-#include <time.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <signal.h>
-#include <stdbool.h>
+#include "a1mon.h"
+#include "ptree.h"
 
 bool volatile wait = false;
 
@@ -17,18 +7,15 @@ void sig_handler(int signal){
     wait = false;
 }
 
-
 int main(int argc, char *argv[]){
 
     sigset_t signal_mask;
-    int target_pid;
+    pid_t target_pid;
     int interval;
     int counter = 0;
     FILE *in_stream;
 
     struct rlimit new_limit = {1,1};
-    struct tms tbuf_before, tbuf_after;
-    clock_t wall_before, wall_after;
     if(setrlimit(RLIMIT_CPU, &new_limit)==-1)
         perror("setrlimit(RLIMIT_CPU)");
 
@@ -70,22 +57,56 @@ int main(int argc, char *argv[]){
     size_t n = 100;
     size_t nread;
     line = (char *) malloc(n);
+    pid_t pid;
+    pid_t ppid;
+    char state;
+    // CAUTION: TREE STRUCT TRACKS DYNAMICALLY ALLOCATED MEMORY; SEE "ptree.h"
+    TREE old_tree;
+    TREE new_tree;
+    bool target_found = 0;
 
     while(true){
         while(wait){}
+        sigprocmask(SIG_BLOCK, &signal_mask, NULL);
         wait = true;
         counter++;
         printf("a1mon [counter= %d, pid= %d, target_pid= %d, interval= %d sec]:",
         counter, getpid(), target_pid, interval);
+        new_tree = init_tree(target_pid);
         in_stream = popen("ps -u $USER -o user,pid,ppid,state,start,cmd --sort start", "r");
         while((nread = getline(&line, &n, in_stream)) != -1){
             printf("%s",line);
-            
+            /*assumption: since entries are sorted by start time, parent will
+                          appear before any child. */
+            strtok(line, " ");  //user field
+            pid = atoi(strtok(NULL, " "));
+            ppid = atoi(strtok(NULL, " "));
+            state = strtok(NULL, " ")[0];
+            if (!target_found && pid == target_pid){
+                    if (state == 'Z'){
+                        //head process is terminated, kill tree and quit
+                        kill_tree(&old_tree);
+                        return 0;
+                    }
+                    target_found = true;
+                    continue;
+            } else if (target_found){
+                if(is_node(&new_tree, ppid)) add_node(&new_tree, pid);
+            }
+        }
+        if (!target_found){
+            // no target_pid process discovered, kill all and quit.
+            kill_tree(&old_tree);
+            return 0;
+        } else {
+            delete_tree(&old_tree);
+            old_tree = new_tree;
+            print_tree(&old_tree);
+            target_found = false;
         }
         if ( pclose(in_stream) == -1)
             perror("pclose");
+        sigprocmask(SIG_UNBLOCK, &signal_mask, NULL);
     }
-
-ssize_t getline(char **lineptr, size_t *n, FILE *stream);
     free(line);
 }
