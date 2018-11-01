@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <poll.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 void sw_sig_handler(int signal);
 void switch_list();
@@ -44,9 +45,23 @@ void start_switch(int num,
     struct sigaction sig_struct;
     init_switch(&self, &sig_struct);
     printf("Initialisation successful.\n");
-    while (1){
-
+    bool endoffile = 0;
+    char input[LINE_BUFFER];
+    while (true){
+        if (!endoffile){
+            if (fgets(input, LINE_BUFFER, self.traffic_stream) == NULL)
+                endoffile = true;
+            else {
+                char *tok;
+                if ((tok = strtok(input, " \n")) == NULL) continue;
+                else if (tok[0] == '#') continue;
+                else {
+                    
+                }
+            }
+        }
     }
+
     //if not EOF: read single line from TrafficFile
         //ignore empty lines, comments lines (starting with #), and lines for other switches
         //if line specifies current switch, admit packet
@@ -114,7 +129,7 @@ void init_switch(Switch *self, struct sigaction *sig_struct){
     char input[LINE_BUFFER];
     size_t n = LINE_BUFFER;
     ssize_t n_read;
-    poll(&self->fds_rd[0], 1, -1);
+    poll(&self->fds_rd[0], 1, -1); //hang forever waiting for ACK
     if ((n_read = read(self->fds_rd[0].fd, input, n)) <= 0) perror("problem with read"); //problems
     if (strcmp(input, "ACK") != 0){perror("didn't get an ACK"); exit(EXIT_FAILURE);}//problems
 
