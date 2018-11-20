@@ -18,5 +18,7 @@
 typedef struct pollfd pollfd;
 
 int get_fifo_name(char * str, int from, int to);
+void write_tofifo(int fd, char *str);
+int read_fromfifo(int fd, char *buf);
 
 #endif

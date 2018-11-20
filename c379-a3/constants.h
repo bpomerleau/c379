@@ -1,5 +1,5 @@
-#ifndef CONSTANTS_H
 #define CONSTANTS_H
+#ifndef CONSTANTS_H
 
 #define MAX_NSW 7
 #define FILENAME_BUFFER 10
@@ -7,8 +7,10 @@
 #define MAX_IP 1000
 #define MIN_PRI 4
 #define MAX_PACKET_LENGTH LINE_BUFFER
+#define MAX_PORT 65535
 
+enum PACKET_TYPE {RELAY, OPEN, ACK, QUERY, ADD};
 
-enum actionType {FORWARD, DROP};
+enum ACTION_TYPE {FORWARD, DROP};
 
 #endif

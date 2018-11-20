@@ -18,28 +18,24 @@
 #include <stdio.h>
 
 typedef struct Rule {
-    unsigned int srcIP_lo, srcIP_hi, destIP_lo, destIP_hi;
+    int srcIP_lo, srcIP_hi, destIP_lo, destIP_hi;
     int actionType, actionVal;
     int pri;
     int pktCount;
 } Rule;
 
 typedef struct Switch {
-    int num;
-    unsigned int IPlow, IPhigh;
+    int id;
+    int IPlow, IPhigh;
     int ports[3];
-    pollfd fds_rd[3];
-    int fds_wr[3];
-    FILE *traffic_stream;
-    Rule flow_table[100];
     int n_rules;
 } Switch;
 
-void start_switch(int num,
+void start_switch(int id,
                 const char *trafficfile,
                 int port1,
                 int port2,
-                unsigned int IPlow,
-                unsigned int IPhigh);
+                int IPlow,
+                int IPhigh);
 
 #endif
