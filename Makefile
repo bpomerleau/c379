@@ -6,7 +6,6 @@ SRC=src
 all: a1jobs a1mon
 
 
-
 clean:
 	rm -f a1jobs a1mon *.o *.tar
 a1jobs: a1jobs.c
@@ -29,4 +28,4 @@ test.o: tests.c
 
 tar:
 	rm -f submit.tar
-	tar -cf submit.tar *.c *.h Makefile
+	tar -cf submit.tar *.c *.h Makefile *.pdf

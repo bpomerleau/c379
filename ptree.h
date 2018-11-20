@@ -1,3 +1,15 @@
+/**
+* ptree.h
+*
+* developed for CMPUT379 Assignment 1
+*
+* author: Brady Pomerleau  -- bpomerle@ualberta.ca
+*
+* struct and functions for keeping track of a process and its descendent
+* process tree
+*
+*/
+
 #ifndef PTREE_H
 #define PTREE_H
 
@@ -8,6 +20,8 @@
 #include <signal.h>
 #include <stdbool.h>
 
+#define MAX_TREE_BUF_SIZE 100
+
 
 typedef struct ptree {
     pid_t *buf;
@@ -16,7 +30,7 @@ typedef struct ptree {
 } TREE;
 
 TREE init_tree(pid_t root_pid);
-int add_node(TREE * tree, pid_t pid);
+void add_node(TREE * tree, pid_t pid);
 bool is_node(TREE *tree, pid_t pid);
 int kill_tree(TREE *tree);
 void delete_tree(TREE *tree);
