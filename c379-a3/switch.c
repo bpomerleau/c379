@@ -11,6 +11,8 @@
 
 #include "switch.h"
 #include "packet.h"
+#include "fifo_cntrl.h"
+#include "socket_cntrl.h"
 
 #include <stdlib.h>
 #include <sys/types.h>
@@ -21,11 +23,13 @@
 #include <poll.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 void sw_sig_handler(int signal);
 void print_switch();
 void init_switch(struct sigaction *sig_struct, const char *trafficfile,
-                    FILE *traffic_stream, pollfd *keyboard);
+                    char *serv, char *port, FILE *traffic_stream,
+                    pollfd *keyboard);
 bool match_rule( int destIP, int *actiontype, int *actionval);
 void perform_action(Packet pckt, int actiontype, int actionval);
 void query_controller(Packet pckt);
@@ -34,11 +38,12 @@ void do_backlog();
 
 /* --GLOBAL data structs-----------*/
 static Switch self;
-static pollfd fds_rd[3];
-static int fds_wr[3];
+static pollfd fds_rd[2];
+static int fds_wr[2];
 static Rule flow_table[100];
 static int n_rules;
 static Packet backlog[PCKT_BUFFER_SIZE];
+static pollfd controller;
 
 /* GLOBAL counters --------------*/
 static int admit;
@@ -47,27 +52,25 @@ static int query;
 static int relayout;
 
 void start_switch(int id, const char *trafficfile, int port1, int port2,
-                        int IPlow, int IPhigh, char* serv, char* port)
+                        int IPlow, int IPhigh, char *serv, char *port)
 {
 
     self.id=id;
     self.IPlow=IPlow;
     self.IPhigh=IPhigh;
-    self.ports[0]=0;
-    self.ports[1]=port1;
-    self.ports[2]=port2;
+    self.ports[0]=port1;
+    self.ports[1]=port2;
 
     struct sigaction sig_struct;
     pollfd keyboard;
-    pollfd controller;
     FILE *traffic_stream;
     if ((traffic_stream = fopen(trafficfile, "r")) == NULL) perror("opening trafficFile");
 
 
-    init_switch(&sig_struct, trafficfile, serv, port, traffic_stream, &keyboard, &controller);
+    init_switch(&sig_struct, trafficfile, serv, port, traffic_stream, &keyboard);
 
 
-    bool endoffile = 0;
+    bool endoffile = false;
     while (true){
 
         // 1. if not EOF: read single line from TrafficFile
@@ -108,41 +111,47 @@ void start_switch(int id, const char *trafficfile, int port1, int port2,
                 //if list: list
                 if (strncmp(input, "list", 4) == 0) print_switch();
                 //if exit: list and exit
-                else if (strncmp(input, "exit", 4) == 0) {print_switch(); exit(EXIT_SUCCESS);}
+                else if (strncmp(input, "exit", 4) == 0) {print_switch(); exit(EXIT_SUCCESS);} //TODO add closing sockets and files
             }
         }
 
         // 3. poll controller socket
-        // 4. poll incoming FIFOs (3 ports)
-        if (poll(fds_rd, 3, 0) > 0) {
-            for (int i = 0; i < 3; i++) {
+        if (poll(&controller, 1, 0) > 0) {
+            char input[LINE_BUFFER] = "\0";
+            if (read_from_socket(controller.fd, input) == 0) {
+                Packet rcv_pckt;
+                str2pckt(input, &rcv_pckt);
+                if (rcv_pckt.field[0] == ADD){
+                    //update switch info, respond with ACK
+                    flow_table[n_rules].srcIP_lo = 0;
+                    flow_table[n_rules].srcIP_hi = MAX_IP;
+                    flow_table[n_rules].destIP_lo = rcv_pckt.field[1];
+                    flow_table[n_rules].destIP_hi = rcv_pckt.field[2];
+                    flow_table[n_rules].actionType = rcv_pckt.field[3];
+                    flow_table[n_rules].actionVal = rcv_pckt.field[4];
+                    flow_table[n_rules++].pri = rcv_pckt.field[5];
+
+                    do_backlog();
+                }
+            }
+        }
+
+        // 4. poll incoming FIFOs (2 ports)
+        if (poll(fds_rd, 2, 0) > 0) {
+
+            for (int i = 0; i < 2; i++) {
+
                 if (fds_rd[i].revents & POLLIN) {
                     char input[LINE_BUFFER] = "\0";
+
                     if (read_fromfifo(fds_rd[i].fd, input) == 0){
-                        //handle various cases
                         Packet rcv_pckt;
                         str2pckt(input, &rcv_pckt);
 
-                        switch (rcv_pckt.field[0]) {
-                            case ADD: ;
-                                //update switch info, respond with ACK
-                                flow_table[n_rules].srcIP_lo = 0;
-                                flow_table[n_rules].srcIP_hi = MAX_IP;
-                                flow_table[n_rules].destIP_lo = rcv_pckt.field[1];
-                                flow_table[n_rules].destIP_hi = rcv_pckt.field[2];
-                                flow_table[n_rules].actionType = rcv_pckt.field[3];
-                                flow_table[n_rules].actionVal = rcv_pckt.field[4];
-                                flow_table[n_rules++].pri = rcv_pckt.field[5];
+                        if (rcv_pckt.field[0] == RELAY) {
 
-                                do_backlog();
-
-                                break;
-
-                            case RELAY: ;
-                                relayin++;
-                                relay(rcv_pckt);
-
-                                break;
+                            relayin++;
+                            relay(rcv_pckt);
 
                         }
                     }
@@ -153,7 +162,7 @@ void start_switch(int id, const char *trafficfile, int port1, int port2,
 }
 
 void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *serv,
-                    char *port, FILE *traffic_stream, pollfd *keyboard, pollfd *controller){
+                    char *port, FILE *traffic_stream, pollfd *keyboard){
     //initialize SIGUSR1 signal handling
     sigset_t signal_mask;
     if (sigemptyset(&signal_mask) < 0)
@@ -172,10 +181,12 @@ void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *se
     relayout = 0;
 
     // open controller socket and connect to server
-    setup_client(controller->fd, serv, port);
+    setup_client(&(controller.fd), serv, port);
+    controller.events = POLLIN;
+
     //open all FIFOs for read and write (prevent blocking)
     char fifo[FILENAME_BUFFER];
-    for (int i = 0; i<3; i++){
+    for (int i = 0; i<2; i++){
         if (self.ports[i] == -1) continue;
         get_fifo_name(fifo, self.ports[i], self.id);
         if ((fds_rd[i].fd = open(fifo, O_RDWR | O_NONBLOCK)) < 0)
@@ -185,7 +196,6 @@ void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *se
         if ((fds_wr[i] = open(fifo, O_RDWR | O_NONBLOCK)) < 0)
         perror(fifo);
     }
-    controller->events = POLLIN;
 
     keyboard->fd = STDIN_FILENO;
     keyboard->events = POLLIN;
@@ -208,17 +218,17 @@ void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *se
         "%i %i %i %i %i %i",
         OPEN, self.id, self.ports[1],
         self.ports[2], self.IPlow, self.IPhigh);
-        write_to_socket(controller->fd, packet);
-        // wait for ACK
-        char input[LINE_BUFFER];
-        poll(controller, 1, -1); //hang forever waiting for ACK
-        if (read_from_socket(controller->fd, input) == 0) {
-            Packet rcv_pckt;
-            str2pckt(input, &rcv_pckt);
-            if (rcv_pckt.field[0] != ACK){
-                printf("Received: %s\nNot ACK\n", input);
-                exit(EXIT_FAILURE);}//problems
-        }
+    write_to_socket(controller.fd, packet);
+    // wait for ACK
+    char input[LINE_BUFFER];
+    poll(&controller, 1, -1); //hang forever waiting for ACK
+    if (read_from_socket(controller.fd, input) == 0) {
+        Packet rcv_pckt;
+        str2pckt(input, &rcv_pckt);
+        if (rcv_pckt.field[0] != ACK){
+            printf("Received: %s\nNot ACK\n", input);
+            exit(EXIT_FAILURE);}//problems
+    }
 
 
 }
@@ -285,7 +295,7 @@ void query_controller(Packet pckt){
         char str[MAX_PACKET_LENGTH];
         snprintf(str, MAX_PACKET_LENGTH,
             "%i %i %i", QUERY, self.id, pckt.field[2]);
-        write_tofifo(fds_wr[0], str);
+        write_to_socket(controller.fd, str);
         query++;
     }
     pckt_buf_op(STORE, backlog, &pckt);

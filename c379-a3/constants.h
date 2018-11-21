@@ -1,5 +1,5 @@
-#define CONSTANTS_H
 #ifndef CONSTANTS_H
+#define CONSTANTS_H
 
 #define MAX_NSW 7
 #define FILENAME_BUFFER 10

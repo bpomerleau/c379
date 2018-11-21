@@ -18,7 +18,7 @@
 
 
 
-void start_controller(int n_switch, int port);
+void start_controller(int n_switch, char *port);
 
 
 #endif

@@ -1,5 +1,13 @@
 
 #include "socket_cntrl.h"
+#include "constants.h"
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 void setup_server(int *sockfd, char *port){
     // code for a server waiting for connections
@@ -66,7 +74,7 @@ void setup_client(int *sockfd, char *server_address, char *port){
             continue;
         }
 
-        if (connect(controller->fd, p->ai_addr, p->ai_addrlen) == -1) {
+        if (connect(*sockfd, p->ai_addr, p->ai_addrlen) == -1) {
             perror("connect");
             close(*sockfd);
             continue;
@@ -86,9 +94,15 @@ void setup_client(int *sockfd, char *server_address, char *port){
 }
 
 int read_from_socket(int sockfd, char *str){
-    return 0;
+    if (recv(sockfd, str, MAX_PACKET_LENGTH, 0) > 0){
+        printf("Received: %s\n", str);
+        return 0;
+    }
+    return -1;
 }
 
-int write_to_socket(int sockfd, char *str){
-    return 0;
+void write_to_socket(int sockfd, char *str){
+    printf("Transmitting: %s\n", str);
+    if (send(sockfd, str, strlen(str)+1, MSG_DONTWAIT) == -1) perror("send on socket error");
+    return;
 }

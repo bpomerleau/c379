@@ -14,8 +14,6 @@
 
 #define _XOPEN_SOURCE 700
 #include "constants.h"
-#include "fifo_cntrl.h"
-#include <stdio.h>
 
 typedef struct Rule {
     int srcIP_lo, srcIP_hi, destIP_lo, destIP_hi;
@@ -27,7 +25,7 @@ typedef struct Rule {
 typedef struct Switch {
     int id;
     int IPlow, IPhigh;
-    int ports[3];
+    int ports[2];
     int n_rules;
 } Switch;
 

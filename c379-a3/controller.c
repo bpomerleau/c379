@@ -11,6 +11,7 @@
 
 #include "controller.h"
 #include "fifo_cntrl.h"
+#include "socket_cntrl.h"
 #include "packet.h"
 
 #include <stdlib.h>
@@ -24,17 +25,6 @@
 #include <poll.h>
 #include <unistd.h>
 
-// typedef struct Switches {
-//     Switch *switches;
-//     struct pollfd *fifo_in;
-//     struct pollfd *fifo_out;
-// } Switches;
-
-void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port);
-void print_controller(Counters c, Switch *switches);
-void ctrl_sig_handler(int signal);
-void answer_query(Packet rcv_pckt);
-
 typedef struct Counters{
     int nSwitch;
     int connected_switches;
@@ -44,20 +34,22 @@ typedef struct Counters{
     int add;
 } Counters;
 
+void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port);
+void print_controller();
+void ctrl_sig_handler(int signal);
+void answer_query(Packet rcv_pckt);
+
+/* ---- global data ------------------*/
+static Counters counters;
+static Switch switches[MAX_NSW];
+static pollfd sockets[MAX_NSW];
+
+
 
 void start_controller(int nSwitch, char *port) {
 
-    Counters counters = { .nSwitch = nSwitch;
-                          .connected_switches = 0;
-                          .open_switches=0;
-                          .ack = 0;
-                          .query = 0;
-                          .add = 0}
     pollfd listen_sock;
     pollfd keyboard;
-    Switch switches[nSwitch];
-    pollfd sockets[nSwitch];
-    int connected_switches = 0;
     Packet pckt_buf[PCKT_BUFFER_SIZE];
 
     init_controller(nSwitch, &keyboard, &listen_sock, port);
@@ -67,8 +59,9 @@ void start_controller(int nSwitch, char *port) {
 
         // i. poll listening socket
         if (poll(&listen_sock, 1, 0) > 0) {
-            if ( (sockets[connected_switches].fd = accept(listen_sock.fd, NULL, NULL)) < 0)
+            if ( (sockets[counters.connected_switches].fd = accept(listen_sock.fd, NULL, NULL)) < 0)
                 perror("Accept connection error");
+            sockets[counters.connected_switches++].events = POLLIN;
         }
 
         // 1. poll keyboard
@@ -77,8 +70,8 @@ void start_controller(int nSwitch, char *port) {
         if (poll(&keyboard, 1, 0) > 0) {
             if ((n_read = read(STDIN_FILENO, input, LINE_BUFFER)) <= 0){} //TODO: EOF or error, deal with either
             else if (n_read == 5){ //only interested in "list" and "exit"
-                if (strncmp(input, "list", 4) == 0) print_controller(counters, switches);
-                else if (strncmp(input, "exit", 4) == 0) {print_controller(counters); exit(EXIT_SUCCESS);}
+                if (strncmp(input, "list", 4) == 0) print_controller();
+                else if (strncmp(input, "exit", 4) == 0) {print_controller(); exit(EXIT_SUCCESS);}
             }
         }
 
@@ -86,7 +79,7 @@ void start_controller(int nSwitch, char *port) {
         if (poll(sockets, nSwitch, 0) > 0) {
             for (int i = 0; i < nSwitch; i++) {
                 if (sockets[i].revents & POLLIN) {
-                    if (read_from_socket(socket[i].fd, input) == 0){
+                    if (read_from_socket(sockets[i].fd, input) == 0){
                         //handle various cases
                         Packet rcv_pckt;
                         if ( str2pckt(input, &rcv_pckt) == -1) continue;
@@ -97,23 +90,23 @@ void start_controller(int nSwitch, char *port) {
                                 counters.open_switches++;
 
                                 switches[i].id = rcv_pckt.field[1];
-                                switches[i].ports[1] = rcv_pckt.field[2];
-                                switches[i].ports[2] = rcv_pckt.field[3];
+                                switches[i].ports[0] = rcv_pckt.field[2];
+                                switches[i].ports[1] = rcv_pckt.field[3];
                                 switches[i].IPlow = rcv_pckt.field[4];
                                 switches[i].IPhigh = rcv_pckt.field[5];
                                 //send ACK
                                 char str[MAX_PACKET_LENGTH] = "\0";
                                 snprintf(str, MAX_PACKET_LENGTH, "%i", ACK);
-                                write_tofifo(fifo_out[i], str);
+                                write_to_socket(sockets[i].fd, str);
                                 counters.ack++;
 
-                                if (open_switches == nSwitch) {
+                                if (counters.open_switches == nSwitch) {
                                     Packet backlog_pckt;
                                     while ( pckt_buf_op(RM, pckt_buf, &backlog_pckt) == 0 ){
                                         char str[MAX_PACKET_LENGTH] = "\0";
                                         pckt2str(backlog_pckt, str);
                                         printf("doing_backlog:\n %s\n", str);
-                                        answer_query(backlog_pckt, counters);
+                                        answer_query(backlog_pckt);
                                     }
                                 }
 
@@ -122,11 +115,11 @@ void start_controller(int nSwitch, char *port) {
                             case QUERY:
 
                                 counters.query++;
-                                if (open_switches < nSwitch) {
+                                if (counters.open_switches < nSwitch) {
                                     pckt_buf_op(STORE, pckt_buf, &rcv_pckt);
                                     continue;
                                 }
-                                answer_query(rcv_pckt, counters);
+                                answer_query(rcv_pckt);
                                 break;
 
                             default:
@@ -139,11 +132,16 @@ void start_controller(int nSwitch, char *port) {
     }
 }
 
-void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port);
+void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port)
 {
+    // initialise global Counters
+    counters.nSwitch = n;
+    counters.connected_switches = 0;
+    counters.open_switches=0;
+    counters.ack = 0;
+    counters.query = 0;
+    counters.add = 0;
     //open sockets for each switch
-    char fifo[FILENAME_BUFFER];
-
     setup_server(&(l_sock->fd), port);
 
     if (listen(l_sock->fd, n) < 0) perror("Listen error");
@@ -156,17 +154,17 @@ void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port);
 
 }
 
-void print_controller(Counters c, Switch *switches) {
-    printf("Switch information (nSwitch=%i):\n", c.nSwitch);
-    for (int i = 0; i < c.nSwitch; i++){
+void print_controller() {
+    printf("Switch information (nSwitch=%i):\n", counters.nSwitch);
+    for (int i = 0; i < counters.nSwitch; i++){
         printf("[sw%i] port1= %i, port2= %i, port3= %u-%u\n",
-        switches[i].id, switches[i].ports[1], switches[i].ports[2], switches[i].IPlow, switches[i].IPhigh);
+        switches[i].id, switches[i].ports[0], switches[i].ports[1], switches[i].IPlow, switches[i].IPhigh);
     }
     printf("\n");
     printf("Packet Stats:\n"
         "Received:    OPEN:%i, QUERY:%i\n"
         "Transmitted: ACK:%i, ADD:%i\n\n",
-        c.open_switches,c.query,c.ack,c.add);
+        counters.open_switches,counters.query,counters.ack,counters.add);
 }
 
 void answer_query(Packet rcv_pckt){
@@ -174,7 +172,7 @@ void answer_query(Packet rcv_pckt){
     int i = rcv_pckt.field[1] - 1;
 
     int target_switch = -1;
-    for (int j = 0; j < nSwitch; j++){
+    for (int j = 0; j < counters.nSwitch; j++){
         if (destIP >= switches[j].IPlow && destIP <= switches[j].IPhigh) {
             target_switch = j;
         }
@@ -191,8 +189,8 @@ void answer_query(Packet rcv_pckt){
     Packet snd_pckt = gen_packet(6, ADD, range_low, range_high, action, port, MIN_PRI);
     char snd_str[MAX_PACKET_LENGTH] = "\0";
     pckt2str(snd_pckt, snd_str);
-    write_tofifo(fifo_out[i], snd_str);
-    add++;
+    write_to_socket(sockets[i].fd, snd_str);
+    counters.add++;
 }
 
 
