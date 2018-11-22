@@ -1,7 +1,7 @@
 /**
 * controller.c
 *
-* developed for CMPUT379 Assignment 2
+* developed for CMPUT379 Assignment 3 - a3sdn
 *
 * author: Brady Pomerleau  -- bpomerle@ualberta.ca
 *
@@ -10,8 +10,7 @@
 */
 
 #include "controller.h"
-#include "fifo_cntrl.h"
-#include "socket_cntrl.h"
+#include "io_cntrl.h"
 #include "packet.h"
 
 #include <stdlib.h>
@@ -43,6 +42,8 @@ void answer_query(Packet rcv_pckt);
 static Counters counters;
 static Switch switches[MAX_NSW];
 static pollfd sockets[MAX_NSW];
+static int sw2sock_map[MAX_NSW];
+static int sock2sw_map[MAX_NSW];
 
 
 
@@ -77,27 +78,36 @@ void start_controller(int nSwitch, char *port) {
 
         // 2. poll sockets
         if (poll(sockets, nSwitch, 0) > 0) {
+
             for (int i = 0; i < nSwitch; i++) {
+
                 if (sockets[i].revents & POLLIN) {
-                    if (read_from_socket(sockets[i].fd, input) == 0){
+
+                    if (read_from_socket(sockets[i].fd, input, sock2sw_map[i]+1, 0) > 0){
                         //handle various cases
                         Packet rcv_pckt;
                         if ( str2pckt(input, &rcv_pckt) == -1) continue;
                         switch (rcv_pckt.field[0]) {
 
                             case OPEN:
+                                {}
+                                int sw = rcv_pckt.field[1] - 1;
 
                                 counters.open_switches++;
+                                switches[sw].id = rcv_pckt.field[1];
+                                switches[sw].ports[0] = rcv_pckt.field[2];
+                                switches[sw].ports[1] = rcv_pckt.field[3];
+                                switches[sw].IPlow = rcv_pckt.field[4];
+                                switches[sw].IPhigh = rcv_pckt.field[5];
 
-                                switches[i].id = rcv_pckt.field[1];
-                                switches[i].ports[0] = rcv_pckt.field[2];
-                                switches[i].ports[1] = rcv_pckt.field[3];
-                                switches[i].IPlow = rcv_pckt.field[4];
-                                switches[i].IPhigh = rcv_pckt.field[5];
+                                // map socket# to switches#
+                                sw2sock_map[sw] = i;
+                                sock2sw_map[i] = sw;
+
                                 //send ACK
                                 char str[MAX_PACKET_LENGTH] = "\0";
                                 snprintf(str, MAX_PACKET_LENGTH, "%i", ACK);
-                                write_to_socket(sockets[i].fd, str);
+                                write_to_socket(sockets[i].fd, str, 0, sw + 1);
                                 counters.ack++;
 
                                 if (counters.open_switches == nSwitch) {
@@ -141,10 +151,10 @@ void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port)
     counters.ack = 0;
     counters.query = 0;
     counters.add = 0;
-    //open sockets for each switch
+    //open listening socket
     setup_server(&(l_sock->fd), port);
-
     if (listen(l_sock->fd, n) < 0) perror("Listen error");
+    l_sock->events = POLLIN;
 
     // set up keyboard polling
     keyboard->fd = STDIN_FILENO;
@@ -155,8 +165,8 @@ void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port)
 }
 
 void print_controller() {
-    printf("Switch information (nSwitch=%i):\n", counters.nSwitch);
-    for (int i = 0; i < counters.nSwitch; i++){
+    printf("Switch information (nSwitch=%i):\n", counters.connected_switches);
+    for (int i = 0; i < counters.connected_switches; i++){
         printf("[sw%i] port1= %i, port2= %i, port3= %u-%u\n",
         switches[i].id, switches[i].ports[0], switches[i].ports[1], switches[i].IPlow, switches[i].IPhigh);
     }
@@ -169,7 +179,7 @@ void print_controller() {
 
 void answer_query(Packet rcv_pckt){
     int destIP = rcv_pckt.field[2];
-    int i = rcv_pckt.field[1] - 1;
+    int sw = rcv_pckt.field[1] - 1;
 
     int target_switch = -1;
     for (int j = 0; j < counters.nSwitch; j++){
@@ -183,13 +193,13 @@ void answer_query(Packet rcv_pckt){
                     switches[target_switch].IPhigh : destIP;
     int action = (target_switch >= 0) ? FORWARD : DROP;
     int port;
-    if (action == FORWARD) port = (target_switch < i) ? 1 : 2;
+    if (action == FORWARD) port = (target_switch < sw) ? 1 : 2;
     else port = 0;
 
     Packet snd_pckt = gen_packet(6, ADD, range_low, range_high, action, port, MIN_PRI);
     char snd_str[MAX_PACKET_LENGTH] = "\0";
     pckt2str(snd_pckt, snd_str);
-    write_to_socket(sockets[i].fd, snd_str);
+    write_to_socket(sockets[sw2sock_map[sw]].fd, snd_str, 0, sw+1);
     counters.add++;
 }
 

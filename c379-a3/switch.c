@@ -11,12 +11,12 @@
 
 #include "switch.h"
 #include "packet.h"
-#include "fifo_cntrl.h"
-#include "socket_cntrl.h"
+#include "io_cntrl.h"
 
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <string.h>
 #include <signal.h>
@@ -25,11 +25,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-void sw_sig_handler(int signal);
+void timer_end(int signal);
 void print_switch();
-void init_switch(struct sigaction *sig_struct, const char *trafficfile,
-                    char *serv, char *port, FILE *traffic_stream,
-                    pollfd *keyboard);
+void init_switch(const char *trafficfile, char *serv, char *port,
+                    FILE *traffic_stream, pollfd *keyboard);
 bool match_rule( int destIP, int *actiontype, int *actionval);
 void perform_action(Packet pckt, int actiontype, int actionval);
 void query_controller(Packet pckt);
@@ -44,6 +43,7 @@ static Rule flow_table[100];
 static int n_rules;
 static Packet backlog[PCKT_BUFFER_SIZE];
 static pollfd controller;
+static volatile bool delay;
 
 /* GLOBAL counters --------------*/
 static int admit;
@@ -54,40 +54,61 @@ static int relayout;
 void start_switch(int id, const char *trafficfile, int port1, int port2,
                         int IPlow, int IPhigh, char *serv, char *port)
 {
-
     self.id=id;
     self.IPlow=IPlow;
     self.IPhigh=IPhigh;
     self.ports[0]=port1;
     self.ports[1]=port2;
 
-    struct sigaction sig_struct;
     pollfd keyboard;
     FILE *traffic_stream;
     if ((traffic_stream = fopen(trafficfile, "r")) == NULL) perror("opening trafficFile");
 
-
-    init_switch(&sig_struct, trafficfile, serv, port, traffic_stream, &keyboard);
+    init_switch(trafficfile, serv, port, traffic_stream, &keyboard);
 
 
     bool endoffile = false;
     while (true){
 
         // 1. if not EOF: read single line from TrafficFile
-        if (!endoffile){
+        if (!endoffile && !delay){
             char input[LINE_BUFFER];
             if (fgets(input, LINE_BUFFER, traffic_stream) == NULL)
                 endoffile = true;
             else {
-                // printf("File line: %s", input);
                 char copy[LINE_BUFFER];
                 char *tok;
                 strcpy(copy, input);
+
                 if ((tok = strtok(input, " \n")) == NULL) continue;
+
                 else if (tok[0] == '#') continue;
+
                 else if (tok[2] == self.id + 0x30) {
-                    // printf("Admitted from trafficFile: %s", copy);
                     admit++;
+
+                    // start timer if delay message
+                    if (strcmp(strtok(NULL, " "), "delay") == 0){
+                        delay = true;
+                        int millis = atoi(strtok(NULL, " "));
+                        struct timeval time = {
+                            .tv_sec = (time_t) millis/1000,
+                            .tv_usec = (suseconds_t) millis%1000 * 1000
+                        };
+                        struct timeval interval = {
+                            .tv_sec = 0,
+                            .tv_usec = 0
+                        };
+                        struct itimerval itimer = {
+                            .it_interval = interval,
+                            .it_value = time
+                        };
+                        setitimer(ITIMER_REAL, &itimer, NULL);
+                        printf("Entering a delay period for %i millisec.\n", millis);
+                        continue;
+                    }
+
+                    // read in destination IP, attempt to match rule, query for rule o.w,
                     Packet rcv_pckt;
                     str2pckt(copy, &rcv_pckt);
                     int actiontype, actionval;
@@ -118,7 +139,7 @@ void start_switch(int id, const char *trafficfile, int port1, int port2,
         // 3. poll controller socket
         if (poll(&controller, 1, 0) > 0) {
             char input[LINE_BUFFER] = "\0";
-            if (read_from_socket(controller.fd, input) == 0) {
+            if (read_from_socket(controller.fd, input, 0, self.id) > 0) {
                 Packet rcv_pckt;
                 str2pckt(input, &rcv_pckt);
                 if (rcv_pckt.field[0] == ADD){
@@ -144,7 +165,7 @@ void start_switch(int id, const char *trafficfile, int port1, int port2,
                 if (fds_rd[i].revents & POLLIN) {
                     char input[LINE_BUFFER] = "\0";
 
-                    if (read_fromfifo(fds_rd[i].fd, input) == 0){
+                    if (read_from_fifo(fds_rd[i].fd, input, self.ports[i], self.id) == 0){
                         Packet rcv_pckt;
                         str2pckt(input, &rcv_pckt);
 
@@ -161,24 +182,26 @@ void start_switch(int id, const char *trafficfile, int port1, int port2,
     }
 }
 
-void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *serv,
-                    char *port, FILE *traffic_stream, pollfd *keyboard){
-    //initialize SIGUSR1 signal handling
-    sigset_t signal_mask;
-    if (sigemptyset(&signal_mask) < 0)
-    perror("Error on sigemptyset");
-
-    sig_struct->sa_handler = sw_sig_handler;
-    sig_struct->sa_mask = signal_mask;
-
-    if (sigaction(SIGUSR1, sig_struct, NULL) < 0)
-    perror("Error on sigaction(SIGUSR1)");
+void init_switch(const char *trafficfile, char *serv,
+                    char *port, FILE *traffic_stream, pollfd *keyboard)
+{
+    // setup SIGALRM handler
+    sigset_t mask;
+    if (sigemptyset(&mask) < 0) perror("sigemptyset");
+    struct sigaction timer =
+            {
+              .sa_handler = timer_end,
+              .sa_mask = mask,
+              .sa_flags = 0
+            };
+    if (sigaction(SIGALRM, &timer, NULL) < 0) perror("sigaction on timer");
 
     //initialise globals
     admit = 0;
     relayin = 0;
     query = 0;
     relayout = 0;
+    delay = false;
 
     // open controller socket and connect to server
     setup_client(&(controller.fd), serv, port);
@@ -216,13 +239,13 @@ void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *se
     char packet[MAX_PACKET_LENGTH];
     snprintf(packet, MAX_PACKET_LENGTH,
         "%i %i %i %i %i %i",
-        OPEN, self.id, self.ports[1],
-        self.ports[2], self.IPlow, self.IPhigh);
-    write_to_socket(controller.fd, packet);
+        OPEN, self.id, self.ports[0],
+        self.ports[1], self.IPlow, self.IPhigh);
+    write_to_socket(controller.fd, packet, self.id, 0);
     // wait for ACK
     char input[LINE_BUFFER];
     poll(&controller, 1, -1); //hang forever waiting for ACK
-    if (read_from_socket(controller.fd, input) == 0) {
+    if (read_from_socket(controller.fd, input, 0, self.id) > 0) {
         Packet rcv_pckt;
         str2pckt(input, &rcv_pckt);
         if (rcv_pckt.field[0] != ACK){
@@ -233,8 +256,8 @@ void init_switch(struct sigaction *sig_struct, const char *trafficfile, char *se
 
 }
 
-void sw_sig_handler(int signal){
-    print_switch();
+void timer_end(int signal){
+    delay = false;
 }
 
 void print_switch() {
@@ -282,7 +305,7 @@ void perform_action(Packet pckt, int actiontype, int actionval){
             "%i %i %i", RELAY, pckt.field[1], pckt.field[2]);
 
         if (actionval < 3){
-            write_tofifo(fds_wr[actionval], str_out);
+            write_to_fifo(fds_wr[actionval-1], str_out, self.id, self.ports[actionval-1]);
             relayout++;
         }
     } //nothing to do for DROP
@@ -295,7 +318,7 @@ void query_controller(Packet pckt){
         char str[MAX_PACKET_LENGTH];
         snprintf(str, MAX_PACKET_LENGTH,
             "%i %i %i", QUERY, self.id, pckt.field[2]);
-        write_to_socket(controller.fd, str);
+        write_to_socket(controller.fd, str, self.id, 0);
         query++;
     }
     pckt_buf_op(STORE, backlog, &pckt);
