@@ -1,0 +1,12 @@
+# An instance of the Dining Philosophers Problem with 5 people
+#
+
+resources A:3 B:3
+task t1 50 50 A:1 B:3
+task
+task t2 50 25
+task t3 50 50 B:2
+task t6
+task t4 50 100 A:2 B:2
+task t7 50
+task t5 50 10 B:1

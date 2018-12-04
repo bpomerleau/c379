@@ -1,0 +1,28 @@
+resources A:1 B:2 C:3 D:4 E:5 F:6 G:7 H:8 I:9 J:10 K:11 L:12
+task t1 10 10
+task t2 10 10 A:1
+task t3 10 10 A:1 B:2
+task t4 10 10 A:1 B:2 C:3
+task t5 10 10 A:1 B:2 C:3 D:4
+task t6 10 10 B:2 C:3 D:4
+task t7 10 10 C:3 D:4
+task t8 10 10 D:4
+task t9 10 10
+task t10 10 10
+task t11 10 10 A:1
+task t12 10 10 A:1 B:2
+task t13 10 10 A:1 B:2 C:3
+task t14 10 10 A:1 B:2 C:3 D:4
+task t15 10 10 B:2 C:3 D:4
+task t16 10 10 C:3 D:4
+task t17 10 10 D:4
+task t18 10 10
+task t19 10 10
+task t20 10 10 A:1
+task t21 10 10 A:1 B:2
+task t22 10 10 A:1 B:2 C:3
+task t23 10 10 A:1 B:2 C:3 D:4
+task t24 10 10 B:2 C:3 D:4
+task t25 10 10 C:3 D:4
+task t26 10 10 D:4
+task t27 10 10

@@ -1,7 +1,7 @@
 /**
 * main.h
 *
-* developed for CMPUT379 Assignment 3 - a3sdn
+* developed for CMPUT379 Assignment 4 - a4tasks
 *
 * author: Brady Pomerleau  -- bpomerle@ualberta.ca
 *

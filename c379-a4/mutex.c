@@ -1,24 +1,16 @@
 /**
-* packet.c
+* mutex.c
 *
-* developed for CMPUT379 Assignment 2
+* developed for CMPUT379 Assignment 4
 *
 * author: Brady Pomerleau  -- bpomerle@ualberta.ca
 *
-* main program
 *
 */
 #include "mutex.h"
 #include "constants.h"
-
 #include <stdlib.h>
-// #include <stdarg.h>
 #include <stdio.h>
-// #include <string.h>
-// #include <stdbool.h>
-
-#include <pthread.h>
-
 
 void init_mutex(pthread_mutex_t *mutex){
     if (pthread_mutex_init(mutex, NULL) != 0) {

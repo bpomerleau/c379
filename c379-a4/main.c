@@ -1,7 +1,7 @@
 /**
 * main.c
 *
-* developed for CMPUT379 Assignment 2 - a2sdn
+* developed for CMPUT379 Assignment 4 - a4tasks
 *
 * author: Brady Pomerleau  -- bpomerle@ualberta.ca
 *
@@ -17,11 +17,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/times.h>
-// #include <stdio.h>
-// #include <stdbool.h>
-#include <pthread.h>
-
-#include <unistd.h>
 
 void parse_file(char *filename);
 void parse_line(char *line);
@@ -96,13 +91,16 @@ void parse_file(char *filename){
     }
 }
 
+/**
+*   Only safe to call before multi-threading begun
+*/
 void parse_line(char * line) {
     char *tok;
     tok = strtok(line, " \n");
     if (strcmp(tok, "resources") == 0) {
         char *res_val[NRES_TYPES];
         while ((tok = strtok(NULL, " ")) != NULL) {
-            res_val[num_res_types++] = tok;
+            if (num_res_types < NRES_TYPES) res_val[num_res_types++] = tok;
         }
         for (int i = 0; i < num_res_types; i++){
             strcpy(resources[i].name, strtok(res_val[i], ":"));
@@ -112,11 +110,15 @@ void parse_line(char * line) {
         }
     }
     else if (strcmp(tok, "task") == 0){
-        strcpy(tasks[num_tasks].name, strtok(NULL, " "));
+        if (num_tasks == NTASKS) return;
+        if (( tok = strtok(NULL, " ")) == NULL) return;
+        strcpy(tasks[num_tasks].name, tok);
         tasks[num_tasks].state = PRE;
         tasks[num_tasks].count = 0;
-        tasks[num_tasks].busyTime = atoi(strtok(NULL, " "));
-        tasks[num_tasks].idleTime = atoi(strtok(NULL, " "));
+        if (( tok = strtok(NULL, " ")) == NULL) return;
+        tasks[num_tasks].busyTime = atoi(tok);
+        if (( tok = strtok(NULL, " ")) == NULL) return;
+        tasks[num_tasks].idleTime = atoi(tok);
         tasks[num_tasks].totalTime = 0;
         tasks[num_tasks].waitTime = 0;
         tasks[num_tasks].nres_types = 0;
@@ -171,23 +173,4 @@ void print_info(){
     printf("Running time= %5d msec\n", (int) ((times(NULL) - start_time)*MSEC_PER_TICK));
 }
 
-
-// start timer if delay message
-// if (strcmp(strtok(NULL, " "), "delay") == 0){
-//     delay = true;
-//     int millis = atoi(strtok(NULL, " "));
-//     struct timeval time = {
-//         .tv_sec = (time_t) millis/1000,
-//         .tv_usec = (suseconds_t) millis%1000 * 1000
-//     };
-//     struct timeval interval = {
-//         .tv_sec = 0,
-//         .tv_usec = 0
-//     };
-//     struct itimerval itimer = {
-//         .it_interval = interval,
-//         .it_value = time
-//     };
-//     setitimer(ITIMER_REAL, &itimer, NULL);
-//     printf("Entering a delay period for %i millisec.\n", millis);
-//     continue;
+//eof

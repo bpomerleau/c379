@@ -33,4 +33,4 @@ clean:
 
 tar:
 	rm -f submit.tar
-	tar -cf submit.tar *.c *.h Makefile *.pdf
+	tar -cf submit.tar *.c *.h Makefile *.pdf *.dat

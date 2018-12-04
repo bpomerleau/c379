@@ -1,16 +1,15 @@
 /**
-* controller.h
+* task.h
 *
-* developed for CMPUT379 Assignment 2
+* developed for CMPUT379 Assignment 4
 *
 * author: Brady Pomerleau  -- bpomerle@ualberta.ca
 *
-* main program
 *
 */
 
-#ifndef CONTROLLER_H
-#define CONTROLLER_H
+#ifndef TASK_H
+#define TASK_H
 
 #define _XOPEN_SOURCE 700
 #include "constants.h"

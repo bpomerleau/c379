@@ -1,3 +1,13 @@
+/**
+* constants.h
+*
+* developed for CMPUT379 Assignment 4 - a4tasks
+*
+* author: Brady Pomerleau  -- bpomerle@ualberta.ca
+*
+*
+*/
+
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
