@@ -1,0 +1,307 @@
+/**
+* controller.c
+*
+* developed for CMPUT379 Assignment 3 - a3sdn
+*
+* author: Brady Pomerleau  -- bpomerle@ualberta.ca
+*
+* main program
+*
+*/
+
+#include "task.h"
+#include "io_cntrlr.h"
+#include "mutex.h"
+#include <stdlib.h>
+#include <sys/times.h>
+#include <pthread.h>
+
+extern Resource resources[NRES_TYPES];
+extern Task tasks[NTASKS];
+extern pthread_mutex_t mutex;
+extern int num_tasks;
+extern int niter;
+extern clock_t start_time;
+
+int get_resources(int task);
+void release_resources(int task);
+
+void *start_task(void *arg){
+    int mytask = NTASKS;
+    clock_t wait_start;
+    int count;
+
+    lock(&mutex);
+    // choose a task to simulate
+    for (int i = 0; i < num_tasks; i++) {
+        if (tasks[i].state == PRE) {
+            mytask = i;
+            break;
+        }
+    }
+    if (mytask == NTASKS) {
+        printf("Error, unassigned thread.\n");
+        exit(EXIT_FAILURE);
+    }
+    struct timespec busytime = {
+        .tv_sec = (clock_t) tasks[mytask].busyTime/1000,
+        .tv_nsec = (long) tasks[mytask].busyTime%1000 * 1000000
+    };
+    struct timespec idletime = {
+        .tv_sec = (clock_t) tasks[mytask].idleTime/1000,
+        .tv_nsec = (long) tasks[mytask].idleTime%1000 * 1000000
+    };
+    count = tasks[mytask].count;
+    tasks[mytask].state = WAIT;
+    unlock(&mutex);
+    wait_start = times(NULL);
+
+    // main simulation loop
+    while (count != niter){
+
+        if (get_resources(mytask) != 0) continue;
+
+        lock(&mutex);
+        tasks[mytask].waitTime += (int) ((times(NULL) - wait_start)*MSEC_PER_TICK);
+        tasks[mytask].state = RUN;
+        unlock(&mutex);
+
+        // printf("%lu sleeping %i\n",pthread_self(), nanosleep(&busytime, NULL));
+        nanosleep(&busytime, NULL);
+        // printf("task %lu got this far\n", pthread_self());
+
+        lock(&mutex);
+        count = ++tasks[mytask].count;
+        printf("task: %s (tid= %lu, iter= %i, time= %i msec)\n",
+                tasks[mytask].name, pthread_self(),
+                tasks[mytask].count, (int) ((times(NULL) - start_time)*MSEC_PER_TICK));
+        tasks[mytask].state = IDLE;
+        release_resources(mytask);
+        unlock(&mutex);
+
+
+        nanosleep(&idletime, NULL);
+
+        lock(&mutex);
+        tasks[mytask].state = WAIT;
+        unlock(&mutex);
+
+        wait_start = times(NULL);
+
+    }
+
+    return (void *) 0;
+}
+
+// do not call with lock on
+int get_resources(int task) {
+    lock(&mutex);
+    for (int i = 0; i < tasks[task].nres_types; i++) {
+        int id = tasks[task].resources[i].id;
+        if (resources[id].avail >= tasks[task].resources[i].maxAvail){
+            resources[id].avail -= tasks[task].resources[i].maxAvail;
+            tasks[task].resources[i].avail = tasks[task].resources[i].maxAvail;
+        }
+        else {
+            release_resources(task);
+            unlock(&mutex);
+            return 1;
+        }
+    }
+    unlock(&mutex);
+    return 0;
+}
+
+// only call with lock on
+void release_resources(int task) {
+    for (int i = 0; i < tasks[task].nres_types; i++){
+        int id = tasks[task].resources[i].id;
+        resources[id].avail += tasks[task].resources[i].avail;
+        tasks[task].resources[i].avail = 0;
+    }
+}
+// typedef struct Counters{
+//     int nSwitch;
+//     int connected_switches;
+//     int open_switches;
+//     int ack;
+//     int query;
+//     int add;
+// } Counters;
+//
+// void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port);
+// void print_controller();
+// void ctrl_sig_handler(int signal);
+// void answer_query(Packet rcv_pckt);
+//
+// /* ---- global data ------------------*/
+// static Counters counters;
+// static Switch switches[MAX_NSW];
+// static pollfd sockets[MAX_NSW];
+// static int sw2sock_map[MAX_NSW];
+// static int sock2sw_map[MAX_NSW];
+//
+//
+//
+// void start_controller(int nSwitch, char *port) {
+//
+//     pollfd listen_sock;
+//     pollfd keyboard;
+//     Packet pckt_buf[PCKT_BUFFER_SIZE];
+//
+//     init_controller(nSwitch, &keyboard, &listen_sock, port);
+//
+//
+//     while (1){
+//
+//         // i. poll listening socket
+//         if (poll(&listen_sock, 1, 0) > 0) {
+//             if ( (sockets[counters.connected_switches].fd = accept(listen_sock.fd, NULL, NULL)) < 0)
+//                 perror("Accept connection error");
+//             sockets[counters.connected_switches++].events = POLLIN;
+//         }
+//
+//         // 1. poll keyboard
+//         char input[LINE_BUFFER];
+//         ssize_t n_read;
+//         if (poll(&keyboard, 1, 0) > 0) {
+//             if ((n_read = read(STDIN_FILENO, input, LINE_BUFFER)) <= 0){} //TODO: EOF or error, deal with either
+//             else if (n_read == 5){ //only interested in "list" and "exit"
+//                 if (strncmp(input, "list", 4) == 0) print_controller();
+//                 else if (strncmp(input, "exit", 4) == 0) {print_controller(); exit(EXIT_SUCCESS);}
+//             }
+//         }
+//
+//         // 2. poll sockets
+//         if (poll(sockets, nSwitch, 0) > 0) {
+//
+//             for (int i = 0; i < nSwitch; i++) {
+//
+//                 if (sockets[i].revents & POLLIN) {
+//
+//                     if (read_from_socket(sockets[i].fd, input, sock2sw_map[i]+1, 0) > 0){
+//                         //handle various cases
+//                         Packet rcv_pckt;
+//                         if ( str2pckt(input, &rcv_pckt) == -1) continue;
+//                         switch (rcv_pckt.field[0]) {
+//
+//                             case OPEN:
+//                                 {}
+//                                 int sw = rcv_pckt.field[1] - 1;
+//
+//                                 counters.open_switches++;
+//                                 switches[sw].id = rcv_pckt.field[1];
+//                                 switches[sw].ports[0] = rcv_pckt.field[2];
+//                                 switches[sw].ports[1] = rcv_pckt.field[3];
+//                                 switches[sw].IPlow = rcv_pckt.field[4];
+//                                 switches[sw].IPhigh = rcv_pckt.field[5];
+//
+//                                 // map socket# to switches#
+//                                 sw2sock_map[sw] = i;
+//                                 sock2sw_map[i] = sw;
+//
+//                                 //send ACK
+//                                 char str[MAX_PACKET_LENGTH] = "\0";
+//                                 snprintf(str, MAX_PACKET_LENGTH, "%i", ACK);
+//                                 write_to_socket(sockets[i].fd, str, 0, sw + 1);
+//                                 counters.ack++;
+//
+//                                 if (counters.open_switches == nSwitch) {
+//                                     Packet backlog_pckt;
+//                                     while ( pckt_buf_op(RM, pckt_buf, &backlog_pckt) == 0 ){
+//                                         char str[MAX_PACKET_LENGTH] = "\0";
+//                                         pckt2str(backlog_pckt, str);
+//                                         printf("doing_backlog:\n %s\n", str);
+//                                         answer_query(backlog_pckt);
+//                                     }
+//                                 }
+//
+//                                 break;
+//
+//                             case QUERY:
+//
+//                                 counters.query++;
+//                                 if (counters.open_switches < nSwitch) {
+//                                     pckt_buf_op(STORE, pckt_buf, &rcv_pckt);
+//                                     continue;
+//                                 }
+//                                 answer_query(rcv_pckt);
+//                                 break;
+//
+//                             default:
+//                                     printf("Poop, something's fooey!");
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+//
+// void init_controller(int n, pollfd *keyboard, pollfd *l_sock, char *port)
+// {
+//     // initialise global Counters
+//     counters.nSwitch = n;
+//     counters.connected_switches = 0;
+//     counters.open_switches=0;
+//     counters.ack = 0;
+//     counters.query = 0;
+//     counters.add = 0;
+//     //open listening socket
+//     setup_server(&(l_sock->fd), port);
+//     if (listen(l_sock->fd, n) < 0) perror("Listen error");
+//     l_sock->events = POLLIN;
+//
+//     // set up keyboard polling
+//     keyboard->fd = STDIN_FILENO;
+//     keyboard->events = POLLIN;
+//
+//         //TODO: only complete intialisation after all switches connected
+//
+// }
+//
+// void print_controller() {
+//     printf("Switch information (nSwitch=%i):\n", counters.connected_switches);
+//     for (int i = 0; i < counters.connected_switches; i++){
+//         printf("[sw%i] port1= %i, port2= %i, port3= %u-%u\n",
+//         switches[i].id, switches[i].ports[0], switches[i].ports[1], switches[i].IPlow, switches[i].IPhigh);
+//     }
+//     printf("\n");
+//     printf("Packet Stats:\n"
+//         "Received:    OPEN:%i, QUERY:%i\n"
+//         "Transmitted: ACK:%i, ADD:%i\n\n",
+//         counters.open_switches,counters.query,counters.ack,counters.add);
+// }
+//
+// void answer_query(Packet rcv_pckt){
+//     int destIP = rcv_pckt.field[2];
+//     int sw = rcv_pckt.field[1] - 1;
+//
+//     int target_switch = -1;
+//     for (int j = 0; j < counters.nSwitch; j++){
+//         if (destIP >= switches[j].IPlow && destIP <= switches[j].IPhigh) {
+//             target_switch = j;
+//         }
+//     }
+//     int range_low = (target_switch >= 0) ?
+//                     switches[target_switch].IPlow : destIP;
+//     int range_high = (target_switch >= 0) ?
+//                     switches[target_switch].IPhigh : destIP;
+//     int action = (target_switch >= 0) ? FORWARD : DROP;
+//     int port;
+//     if (action == FORWARD) port = (target_switch < sw) ? 1 : 2;
+//     else port = 0;
+//
+//     Packet snd_pckt = gen_packet(6, ADD, range_low, range_high, action, port, MIN_PRI);
+//     char snd_str[MAX_PACKET_LENGTH] = "\0";
+//     pckt2str(snd_pckt, snd_str);
+//     write_to_socket(sockets[sw2sock_map[sw]].fd, snd_str, 0, sw+1);
+//     counters.add++;
+// }
+
+
+
+
+
+
+//eof
