@@ -61,6 +61,7 @@ void *start_task(void *arg){
         tasks[mytask].state = WAIT;
         unlock(&mutex);
 
+
         if (get_resources(mytask) != 0) continue;
 
         lock(&mutex);
@@ -74,9 +75,6 @@ void *start_task(void *arg){
 
         lock(&mutex);
         count = ++tasks[mytask].count;
-        printf("task: %s (tid= %lu, iter= %i, time= %i msec)\n",
-                tasks[mytask].name, pthread_self(),
-                tasks[mytask].count, (int) ((times(NULL) - start_time)*MSEC_PER_TICK));
         tasks[mytask].state = IDLE;
         release_resources(mytask);
         unlock(&mutex);
@@ -84,8 +82,12 @@ void *start_task(void *arg){
 
         nanosleep(&idletime, NULL);
 
+        lock(&mutex);
+        printf("task: %s (tid= %lu, iter= %i, time= %i msec)\n",
+        tasks[mytask].name, pthread_self(),
+        tasks[mytask].count, (int) ((times(NULL) - start_time)*MSEC_PER_TICK));
+        unlock(&mutex);
         wait_start = times(NULL);
-
     }
 
     return (void *) 0;
